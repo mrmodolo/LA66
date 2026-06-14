@@ -62,6 +62,8 @@ Maintainer: Miguel Luis and Gregory Cristian
 #ifndef __FLASH_ERASEPROGRAM_H__
 #define __FLASH_ERASEPROGRAM_H__
 
+#include <stdint.h>
+
 #ifdef __cplusplus
  extern "C" {
 #endif
