@@ -168,6 +168,7 @@ static void StartDownlinkDetect(TxEventType_t EventType);
 static void StartUnconfirmedUplinkChangeToConfirmedUplinkTimeoutTimer(TxEventType_t EventType);
 
 TimerEvent_t downlinkLedTimer;
+TimerEvent_t txLedTimer;
 TimerEvent_t NetworkJoinedLedTimer;
 TimerEvent_t IWDGRefreshTimer;
 TimerEvent_t ReJoinTimer;
@@ -189,7 +190,19 @@ extern TimerEvent_t TxDelayedTimer;
 extern void printf_joinmessage(void);
 
 void OndownlinkLedEvent(void);
+void OnTxLedEvent(void);
 void OnNetworkJoinedLedEvent(void);
+
+#if defined( DRAGINO_LA66 )
+static void lora_send_led(lora_AppData_t *data, LoraConfirm_t type)
+{
+    gpio_write(LED_RGB_PORT, LED_GREEN_PIN, 1);
+    TimerSetValue(&txLedTimer, 200);
+    TimerStart(&txLedTimer);
+    LORA_send(data, type);
+}
+#define LORA_send lora_send_led
+#endif
 
 static void OnIWDGRefreshTimeoutEvent(void);
 static void OnReJoinTimerEvent( void );
@@ -363,10 +376,11 @@ int main(void)
     
 		#if defined( DRAGINO_LA66 )
 		TimerInit( &downlinkLedTimer, OndownlinkLedEvent );
+		TimerInit( &txLedTimer, OnTxLedEvent );
     #endif
 		
 	  while( 1 )
-    {  			
+    {			
 			 if (Radio.IrqProcess != NULL) {
             Radio.IrqProcess();
        }
@@ -1154,6 +1168,12 @@ void OndownlinkLedEvent(void)
 	TimerStop(&downlinkLedTimer);
 	gpio_write(LED_RGB_PORT,LED_RED_PIN,0);
 	gpio_write(LED_RGB_PORT,LED_BLUE_PIN,0);
+}
+
+void OnTxLedEvent(void)
+{
+	TimerStop(&txLedTimer);
+	gpio_write(LED_RGB_PORT, LED_GREEN_PIN, 0);
 }
 
 void OnNetworkJoinedLedEvent(void)

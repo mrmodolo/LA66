@@ -32,18 +32,18 @@ $(PROJECT)_INC_PATH := inc \
     $(TREMO_SDK_PATH)/Projects/Applications/DRAGINO-LRWAN-AT/inc
 	
 $(PROJECT)_CFLAGS  := -Wall -Os -ffunction-sections -mfpu=fpv4-sp-d16 -mfloat-abi=softfp -fsingle-precision-constant -std=gnu99 -fno-builtin-printf -fno-builtin-sprintf -fno-builtin-snprintf
-$(PROJECT)_DEFINES := -DCONFIG_DEBUG_UART=UART0 -DREGION_AU915 -DCONFIG_LOG -DPRINT_BY_DMA -DCONFIG_LORA_USE_TCXO -DDRAGINO_LA66
+$(PROJECT)_DEFINES := -DCONFIG_DEBUG_UART=UART0 -DREGION_US915 -DCONFIG_LOG -DPRINT_BY_DMA -DCONFIG_LORA_USE_TCXO -DDRAGINO_LA66
 
 $(PROJECT)_LDFLAGS := -Wl,--gc-sections -Wl,--wrap=printf -Wl,--wrap=sprintf -Wl,--wrap=snprintf
 
 $(PROJECT)_LINK_LD := cfg/gcc.ld
 
 # please change the settings to download the app
-SERIAL_PORT        :=/dev/ttyUSB0
+SERIAL_PORT        := /dev/ttyUSB0
 #SERIAL_BAUDRATE    :=
 #$(PROJECT)_ADDRESS :=
 
-#########################################################################
+##################################################################################################
 include $(TREMO_SDK_PATH)/build/make/common.mk
 
 

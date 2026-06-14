@@ -23,6 +23,7 @@
 #include "lora_config.h"
 #include "radio.h"
 #include "tremo_rcc.h"
+#include "tremo_rtc.h"
 #include "sx126x-board.h"
 
 #define ARGC_LIMIT 16
@@ -169,6 +170,7 @@ static int at_disfcntcheck_func(int opt, int argc, char *argv[]);
 static int at_dismacans_func(int opt, int argc, char *argv[]);
 static int at_devicetimereq_func(int opt, int argc, char *argv[]);
 static int at_chsignaldetect_func(int opt, int argc, char *argv[]);
+static int at_test_func(int opt, int argc, char *argv[]);
 
 #ifdef LA66_HARDWARE_TEST
 static int at_gpiotest_func(int opt, int argc, char *argv[]);
@@ -238,6 +240,7 @@ static at_cmd_t g_at_table[] = {
 		{AT_DISMACANS, at_dismacans_func},		
 		{AT_DEVICETIMEREQ,at_devicetimereq_func},
 		{AT_CHSIGNALDETECT,at_chsignaldetect_func},
+		{AT_TEST,at_test_func},
 		#ifdef LA66_HARDWARE_TEST
 		{AT_GPIOTEST,at_gpiotest_func},
 		{AT_CTXCW,at_ctxcw_func},
@@ -3326,7 +3329,7 @@ void linkwan_serial_input(uint8_t cmd)
     
     if ((cmd >= '0' && cmd <= '9') || (cmd >= 'a' && cmd <= 'z') ||
         (cmd >= 'A' && cmd <= 'Z') || cmd == '?' || cmd == '+' ||
-        cmd == ':' || cmd == '=' || cmd == ' ' || cmd == ',' || cmd == '-') {
+        cmd == ':' || cmd == '=' || cmd == ' ' || cmd == ',' || cmd == '-' || cmd == '.') {
         if (atcmd_index >= ATCMD_SIZE) {
             memset(atcmd, 0xff, ATCMD_SIZE);
             atcmd_index = 0;
@@ -3469,6 +3472,235 @@ void linkwan_at_process(void)
 
 
 
+
+/* -----------------------------------------------------------------------
+ * AT+TEST  —  P2P LoRa radio test commands
+ *
+ * AT+TEST=RFCFG,<freq_MHz>,<SF>,<BW_kHz>,<TX_preamble>,<RX_preamble>,<power_dBm>
+ *   Example: AT+TEST=RFCFG,915.125,10,125,8,8,14
+ *
+ * AT+TEST=TXLRPKT,<HEX>
+ *   Example: AT+TEST=TXLRPKT,AABBCCDD
+ *
+ * AT+TEST=RXLRPKT
+ *   Blocks up to 5 s waiting for one packet then prints:
+ *   +TEST: RX "HEXDATA",RSSI,SNR
+ * ----------------------------------------------------------------------- */
+
+static struct {
+    uint32_t freq;        /* Hz  */
+    uint8_t  sf;          /* 7-12 */
+    uint8_t  bw;          /* 0=125k 1=250k 2=500k */
+    uint8_t  tx_pre;
+    uint8_t  rx_pre;
+    int8_t   power;       /* dBm */
+    bool     public_net;  /* false=0x1424 (private), true=0x3444 (public/LoRaWAN) */
+} s_p2p = {
+    .freq       = 915125000,
+    .sf         = 10,
+    .bw         = 0,
+    .tx_pre     = 8,
+    .rx_pre     = 8,
+    .power      = 14,
+    .public_net = false,
+};
+
+/* parse "915.125" -> 915125000 without using atof() */
+static uint32_t p2p_parse_freq_hz(const char *s)
+{
+    uint32_t whole = 0, frac = 0, scale = 1;
+    int in_frac = 0;
+    while (*s) {
+        if (*s == '.') {
+            in_frac = 1;
+        } else if (*s >= '0' && *s <= '9') {
+            if (!in_frac) {
+                whole = whole * 10 + (uint32_t)(*s - '0');
+            } else {
+                frac  = frac * 10 + (uint32_t)(*s - '0');
+                scale *= 10;
+            }
+        }
+        s++;
+    }
+    while (scale < 1000000) { frac *= 10; scale *= 10; }
+    while (scale > 1000000) { frac /= 10; scale /= 10; }
+    return whole * 1000000 + frac;
+}
+
+/* IrqFired and irqRegs are set by RadioOnDioIrq() ISR in radio.c before
+ * clearing the hardware register — poll these instead of SX126xGetIrqStatus() */
+extern bool IrqFired;
+extern uint16_t irqRegs;
+
+static int at_test_func(int opt, int argc, char *argv[])
+{
+    if (opt == DESC_CMD) {
+        snprintf((char *)atcmd, ATCMD_SIZE,
+            "P2P LoRa: RFCFG,<MHz>,<SF>,<BW_kHz>,<txPre>,<rxPre>,<dBm> | TXLRPKT,HEX | RXLRPKT\r\n");
+        return LWAN_SUCCESS;
+    }
+
+    if (opt != SET_CMD || argc < 1)
+        return LWAN_PARAM_ERROR;
+
+    /* ---- RFCFG ---- */
+    if (strcmp(argv[0], "RFCFG") == 0) {
+        if (argc < 7)
+            return LWAN_PARAM_ERROR;
+
+        uint32_t freq = p2p_parse_freq_hz(argv[1]);
+        if (freq < 100000000UL || freq > 960000000UL)
+            return LWAN_PARAM_ERROR;
+        s_p2p.freq = freq;
+
+        int sf = atoi(argv[2]);
+        if (sf < 7 || sf > 12)
+            return LWAN_PARAM_ERROR;
+        s_p2p.sf = (uint8_t)sf;
+
+        int bw_khz = atoi(argv[3]);
+        if      (bw_khz == 125) s_p2p.bw = 0;
+        else if (bw_khz == 250) s_p2p.bw = 1;
+        else if (bw_khz == 500) s_p2p.bw = 2;
+        else return LWAN_PARAM_ERROR;
+
+        s_p2p.tx_pre    = (uint8_t)atoi(argv[4]);
+        s_p2p.rx_pre    = (uint8_t)atoi(argv[5]);
+        s_p2p.power     = (int8_t)atoi(argv[6]);
+        s_p2p.public_net = (argc >= 8) ? (atoi(argv[7]) != 0) : false;
+
+        snprintf((char *)atcmd, ATCMD_SIZE,
+            "+TEST: RFCFG F:%lu Hz, SF%d, BW%dkHz, TX_PRE:%d, RX_PRE:%d, PWR:%d, SW:%s\r\n",
+            (unsigned long)s_p2p.freq, s_p2p.sf,
+            (s_p2p.bw == 0) ? 125 : (s_p2p.bw == 1) ? 250 : 500,
+            s_p2p.tx_pre, s_p2p.rx_pre, s_p2p.power,
+            s_p2p.public_net ? "PUBLIC(0x3444)" : "PRIVATE(0x1424)");
+        return LWAN_SUCCESS;
+    }
+
+    /* ---- TXLRPKT ---- */
+    if (strcmp(argv[0], "TXLRPKT") == 0) {
+        if (argc < 2)
+            return LWAN_PARAM_ERROR;
+
+        uint8_t pkt[128];
+        uint8_t pkt_len = rxdata_change_hex(argv[1], pkt);
+        if (pkt_len == 0)
+            return LWAN_PARAM_ERROR;
+
+        Radio.SetChannel(s_p2p.freq);
+        Radio.SetPublicNetwork(s_p2p.public_net);
+        Radio.SetTxConfig(MODEM_LORA, s_p2p.power, 0,
+                          s_p2p.bw, s_p2p.sf,
+                          1,               /* coderate 4/5 */
+                          s_p2p.tx_pre,
+                          false,           /* fixLen */
+                          true,            /* crcOn */
+                          false, 0, false, /* no freq-hop */
+                          3000);           /* 3 s timeout */
+
+        /* suspend LoRaWAN timers so the MAC doesn't reconfigure the radio */
+        rtc_config_interrupt(RTC_CYC_IT, DISABLE);
+
+        IrqFired = false;
+        Radio.Send(pkt, pkt_len);
+
+        /* RadioOnDioIrq() ISR saves irqRegs and sets IrqFired — poll that */
+        uint32_t deadline = 3000;
+        while (deadline--) {
+            if (IrqFired) {
+                uint16_t flags = irqRegs;
+                IrqFired = false;
+                if (flags & IRQ_TX_DONE) {
+                    rtc_config_interrupt(RTC_CYC_IT, ENABLE);
+                    Radio.SetPublicNetwork(true);
+                    snprintf((char *)atcmd, ATCMD_SIZE, "+TEST: TX DONE\r\n");
+                    return LWAN_SUCCESS;
+                }
+                break;
+            }
+            delay_ms(1);
+        }
+        IrqFired = false;
+        rtc_config_interrupt(RTC_CYC_IT, ENABLE);
+        Radio.SetPublicNetwork(true);
+        snprintf((char *)atcmd, ATCMD_SIZE, "+TEST: TX TIMEOUT\r\n");
+        return LWAN_SUCCESS;
+    }
+
+    /* ---- RXLRPKT ---- */
+    if (strcmp(argv[0], "RXLRPKT") == 0) {
+        Radio.SetChannel(s_p2p.freq);
+        Radio.SetPublicNetwork(s_p2p.public_net);
+        Radio.SetRxConfig(MODEM_LORA,
+                          s_p2p.bw, s_p2p.sf,
+                          1,           /* coderate 4/5 */
+                          0,           /* bandwidthAfc (unused for LoRa) */
+                          s_p2p.rx_pre,
+                          10,          /* symbTimeout */
+                          false,       /* fixLen */
+                          0,           /* payloadLen (variable) */
+                          true,        /* crcOn */
+                          false, 0, false,  /* no freq-hop */
+                          true);       /* rxContinuous */
+
+        /* suspend LoRaWAN timers so the MAC doesn't reconfigure the radio */
+        rtc_config_interrupt(RTC_CYC_IT, DISABLE);
+
+        IrqFired = false;
+        Radio.Rx(0);  /* continuous — we control timeout via deadline */
+
+        uint32_t deadline = 5000;
+        while (deadline--) {
+            if (IrqFired) {
+                uint16_t flags = irqRegs;
+                IrqFired = false;
+
+                if ((flags & IRQ_RX_DONE) && !(flags & IRQ_CRC_ERROR)) {
+                    uint8_t buf[240];
+                    uint8_t size = 0, offset = 0;
+                    SX126xGetRxBufferStatus(&size, &offset);
+                    if (size > (uint8_t)sizeof(buf))
+                        size = (uint8_t)sizeof(buf);
+                    SX126xReadBuffer(offset, buf, size);
+
+                    PacketStatus_t pst;
+                    SX126xGetPacketStatus(&pst);
+
+                    int pos = snprintf((char *)atcmd, ATCMD_SIZE, "+TEST: RX \"");
+                    for (uint8_t i = 0; i < size && pos < ATCMD_SIZE - 10; i++)
+                        pos += snprintf((char *)atcmd + pos, ATCMD_SIZE - pos, "%02X", buf[i]);
+                    snprintf((char *)atcmd + pos, ATCMD_SIZE - pos,
+                        "\", RSSI:%d, SNR:%d\r\n",
+                        (int)pst.Params.LoRa.RssiPkt,
+                        (int)pst.Params.LoRa.SnrPkt);
+                    Radio.Sleep();
+                    rtc_config_interrupt(RTC_CYC_IT, ENABLE);
+                    Radio.SetPublicNetwork(true);
+                    return LWAN_SUCCESS;
+                }
+                if (flags & IRQ_CRC_ERROR) {
+                    Radio.Sleep();
+                    rtc_config_interrupt(RTC_CYC_IT, ENABLE);
+                    Radio.SetPublicNetwork(true);
+                    snprintf((char *)atcmd, ATCMD_SIZE, "+TEST: RX CRC ERROR\r\n");
+                    return LWAN_SUCCESS;
+                }
+            }
+            delay_ms(1);
+        }
+
+        IrqFired = false;
+        Radio.Sleep();
+        rtc_config_interrupt(RTC_CYC_IT, ENABLE);
+        Radio.SetPublicNetwork(true);
+        snprintf((char *)atcmd, ATCMD_SIZE, "+TEST: RX TIMEOUT\r\n");
+        return LWAN_SUCCESS;
+    }
+
+    return LWAN_PARAM_ERROR;
+}
 
 void linkwan_at_init(void)
 {
