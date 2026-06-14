@@ -3,8 +3,8 @@ import psutil
 import wmi
 import time
 ser = serial.Serial()
-ser.port = 'com3'
-ser.baudrate = 115200
+ser.port = 'com6'
+ser.baudrate = 9600
 ser.bytesize = 8
 ser.parity = 'N'
 ser.stopbits = 1
@@ -21,7 +21,6 @@ def redline1(str):
 def get_cpu_info(): #单位%
     cpu_percent = psutil.cpu_percent(interval=1)
     cpu_info = cpu_percent
-    #print(cpu_info)
     cpu_info = int(cpu_info*100)
     cpu_info = str(hex(cpu_info))[2:]
     if len(cpu_info)%2 != 0:
@@ -36,35 +35,32 @@ def get_memory_info():
     used_memory = virtual_memory.used/1024/1024/1024
     free_memory = virtual_memory.free/1024/1024/1024
     memory_percent = virtual_memory.percent
-    # print(used_memory)
-    # print(free_memory)
-    # print(memory_percent)
-    # for memModule in w.Win32_PhysicalMemory():
-    #     #totalMemSize=(int(memModule.Capacity))/1024**3#每个核的容量单位G
-    #     #totalMemSize = str(hex(int(totalMemSize)))[2:]
-    used_memory = str(hex(int(round(used_memory, 2)*100)))[2:]#使用内存单位G
-    memory_percent = str(hex(int(round(memory_percent, 2)*100)))[2:]#内存使用率单位%
-    free_memory = str(hex(int(round(free_memory, 2)*100)))[2:]#空闲内存单位G
-    # if len(totalMemSize)%2 != 0:
-    #     totalMemSize = '0'+ totalMemSize
-    # else:
-    #     totalMemSize = totalMemSize
-    if len(used_memory)%2 != 0:
-        used_memory = '0'+ used_memory
-    else:
-        used_memory = used_memory
-    if len(memory_percent)%2 != 0:
-        memory_percent = '0'+ memory_percent
-    else:
-        memory_percent = memory_percent
-    if len(free_memory)%2 != 0:
-        free_memory = '0'+ free_memory
-    else:
-        free_memory = free_memory
-    memory_info = used_memory, memory_percent,free_memory
-    return memory_info
+    for memModule in w.Win32_PhysicalMemory():
+        totalMemSize=(int(memModule.Capacity))/1024**3#单位G
+        totalMemSize = str(hex(int(totalMemSize)))[2:]
+        used_memory = str(hex(int(round(used_memory, 2)*100)))[2:]#单位G
+        memory_percent = str(hex(int(round(memory_percent, 2)*100)))[2:]#单位%
+        free_memory = str(hex(int(round(free_memory, 2)*100)))[2:]#单位G
+        if len(totalMemSize)%2 != 0:
+            totalMemSize = '0'+ totalMemSize
+        else:
+            totalMemSize = totalMemSize
+        if len(used_memory)%2 != 0:
+            used_memory = '0'+ used_memory
+        else:
+            used_memory = used_memory
+        if len(memory_percent)%2 != 0:
+            memory_percent = '0'+ memory_percent
+        else:
+            memory_percent = memory_percent
+        if len(free_memory)%2 != 0:
+            free_memory = '0'+ free_memory
+        else:
+            free_memory = free_memory
+        memory_info = totalMemSize,used_memory, memory_percent,free_memory
+        return memory_info
 while True:
     get_cpu_info()
     get_memory_info()
-    redline1(get_cpu_info()+get_memory_info()[0]+get_memory_info()[1]+get_memory_info()[2])
+    redline1(get_cpu_info()+get_memory_info()[0]+get_memory_info()[1]+get_memory_info()[2]+get_memory_info()[3])
     time.sleep(60)
