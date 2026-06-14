@@ -1,2 +1,7 @@
-Projects/Applications/DRAGINO-LRWAN-AT/Output/*
 **/Make_out/
+*.elf
+*.bin
+*.hex
+*.map
+*.o
+*.d
