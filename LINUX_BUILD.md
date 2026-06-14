@@ -182,3 +182,5 @@ After flashing, configure the appropriate AU915 sub-band for your LoRaWAN networ
 
 These modifications do not alter the firmware functionality. They only address compatibility issues between the original SDK and modern Linux environments.
 
+**Acknowledgements**: The Linux compatibility fixes documented here were identified during the process of porting and compiling the original Dragino LA66 SDK on Linux Mint 22.3.
+
